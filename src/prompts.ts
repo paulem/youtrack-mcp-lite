@@ -78,13 +78,15 @@ export function registerPrompts(server: McpServer): void {
     {
       title: 'Recent project activity',
       description: 'What moved in a project over a given period',
+      // `completable` marks the schema object it is handed, and Zod's `.describe()`
+      // returns a clone — so describing afterwards silently drops the completer and the
+      // argument stops offering suggestions. Describe first, always
       argsSchema: z.object({
-        project: completable(z.string(), completeProject).describe('Project short name, e.g. PROJ'),
-        period: completable(z.string(), (value) =>
-          PERIODS.filter((p) => p.toLowerCase().startsWith(value.toLowerCase())),
-        )
-          .optional()
-          .describe(`One of: ${PERIODS.join(', ')} (default: This week)`),
+        project: completable(z.string().describe('Project short name, e.g. PROJ'), completeProject),
+        period: completable(
+          z.string().describe(`One of: ${PERIODS.join(', ')} (default: This week)`),
+          (value) => PERIODS.filter((p) => p.toLowerCase().startsWith(value.toLowerCase())),
+        ).optional(),
       }),
     },
     ({ project, period }) => {
