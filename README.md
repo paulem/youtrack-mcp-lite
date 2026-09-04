@@ -1,0 +1,355 @@
+# youtrack-mcp-lite
+
+A minimal **read-only** MCP server for **on-premises YouTrack**. Seven tools, no build
+step, no Docker.
+
+## Why this exists
+
+YouTrack ships its own MCP server as of **2025.3**. On YouTrack Cloud that is the whole
+story — JetBrains upgrades those instances themselves, so every Cloud instance already
+has it. Use it there; this project has nothing to add.
+
+Self-hosted YouTrack Server is different. It upgrades on the administrator's schedule,
+not JetBrains', and plenty of installs sit years behind — with no MCP option at all. That
+gap is what this fills, and it is the only case it is built for.
+
+It stays useful after an upgrade for anyone who wants a read-only, low-context
+alternative: it never writes to YouTrack, and it is built around spending as few tokens
+as possible per answer.
+
+Measured against [`tonyzorin/youtrack-mcp`][alt], the general-purpose alternative, which
+exposes 55 tools:
+
+| | `tonyzorin/youtrack-mcp` | this |
+| --- | --- | --- |
+| Startup | 588 ms (Docker + Python) | **95 ms** |
+| Tools | 55 | **7** |
+| Tool schemas in context | 17.7 KB (~4,525 tokens) | **3.8 KB (~975 tokens)** |
+| Runtime | Docker image (115 MB) | Node 24, 2 deps |
+| TLS | verification disabled | **verification on** |
+| Writes to YouTrack | yes | **no** |
+
+The tool count is the point. Every schema is resident in context for the whole session,
+whether or not it is ever called.
+
+[alt]: https://github.com/tonyzorin/youtrack-mcp
+
+## Compatibility
+
+Everything here speaks YouTrack's modern `/api` REST API, which YouTrack Server has
+served since **2018.1**. Nothing version-gated is used: no field selector, endpoint, or
+query form below that arrived after that release.
+
+| YouTrack Server | Status |
+| --- | --- |
+| 2018.1 – 2025.2 | **What this is for.** Verified against 2025.1 |
+| 2025.3 and newer | Works, but prefer the [built-in MCP server][builtin] |
+| Older than 2018.1 | Not supported — predates the `/api` REST API |
+
+Check what you are on:
+
+```sh
+curl -H "Authorization: Bearer <token>" "$YOUTRACK_URL/api/config?fields=version,build"
+```
+
+### Deployment shapes
+
+Self-hosted installs vary in ways a Cloud instance never does, so all of these are
+handled:
+
+| Your instance | `YOUTRACK_URL` |
+| --- | --- |
+| Own subdomain | `https://youtrack.example.com` |
+| Under a context path | `https://example.com/youtrack` |
+| Nested deeper | `https://intranet.example.com/tools/youtrack` |
+| Non-standard port | `https://youtrack.example.com:8443` |
+| Plain HTTP on an internal network | `http://youtrack.internal:8080` |
+
+The port is part of the identity check, so a token scoped to `:8443` is never sent to
+`:443` on the same host. Give the scheme explicitly for an HTTP-only instance — a bare
+hostname is assumed to be `https://`.
+
+`http://` is accepted rather than blocked, because plenty of internal installs are served
+that way and refusing them would only push people toward disabling verification
+elsewhere. Know what it costs: the bearer token crosses the network in cleartext, so it is
+a reasonable choice on a trusted segment and a poor one over anything wider.
+
+Attachment URLs are the reason the context path matters: YouTrack hands those back in its
+own payload, and whether they already carry the prefix is not guaranteed. Both forms
+resolve to the same URL, so the prefix is never doubled.
+
+[builtin]: https://www.jetbrains.com/help/youtrack/server/model-context-protocol-server.html
+
+## Requirements
+
+Node **24+** — `src/*.ts` runs directly via native type stripping, so there is no compile
+step and no `dist/`. Only [erasable TypeScript syntax][erasable] is allowed (no `enum`,
+no parameter properties, no decorators).
+
+Debian and Ubuntu archives ship Node 18/20, so install from NodeSource:
+
+```sh
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v          # must print v24.x or newer
+```
+
+On macOS, `brew install node` or any version manager works.
+
+[erasable]: https://nodejs.org/api/typescript.html#type-stripping
+
+## Install
+
+```sh
+git clone <this-repo> ~/youtrack-mcp-lite
+cd ~/youtrack-mcp-lite
+npm ci                      # two runtime deps, no build step
+chmod +x bin/youtrack-mcp   # in case the mode bit did not survive the copy
+```
+
+## Configuration
+
+Nothing instance-specific is committed. `bin/youtrack-mcp` reads it all at launch from
+`~/.config/youtrack-mcp/`, which the repo never touches.
+
+### 1. Point it at your instance
+
+```sh
+mkdir -p ~/.config/youtrack-mcp
+cat > ~/.config/youtrack-mcp/config <<'EOF'
+YOUTRACK_URL=https://youtrack.example.com
+EOF
+chmod 600 ~/.config/youtrack-mcp/config
+```
+
+The file is a shell fragment of `KEY=value` lines, sourced by the wrapper — so a value
+can be computed if you need it to be. It runs as you, so keep it `0600` and yours.
+`YOUTRACK_MCP_CONFIG` points somewhere else if you prefer, and any variable already
+exported in the environment wins over the file.
+
+Include the context path and port if your instance has them — see *Deployment shapes*
+above. A trailing slash is trimmed and a bare hostname is assumed to be `https://`, so
+all four of these mean the same thing:
+
+```
+https://youtrack.example.com     https://youtrack.example.com/
+youtrack.example.com             YOUTRACK.EXAMPLE.COM
+```
+
+### 2. Provide the token
+
+Create a permanent token in *Profile → Account Security → Tokens*. The wrapper tries four
+sources in order and uses the first that answers, so the same wrapper works on a laptop
+and on a headless box:
+
+| Order | Source | Use on |
+| --- | --- | --- |
+| 1 | `$YOUTRACK_API_TOKEN` already exported | systemd units, CI |
+| 2 | macOS Keychain | macOS |
+| 3 | `secret-tool` (libsecret) | Linux desktop with an unlocked keyring |
+| 4 | `0600` token file | **headless Linux** |
+
+On macOS:
+
+```sh
+security add-generic-password -U -A -s youtrack-mcp -a "$(id -un)" -w '<token>'
+```
+
+**`-A` is not optional, and it must be repeated on every rotation.** Without it macOS
+raises a GUI authorization prompt (*"security wants to access key youtrack-mcp"*) on
+every read. A stdio server has no way to answer that dialog, so it simply blocks —
+startup goes from ~120 ms to however long the dialog sits unanswered. Re-storing the
+token without `-A` resets the item's ACL and reintroduces the prompt. If a dialog does
+appear, clicking **Always Allow** (not *Allow*) repairs the ACL permanently; *Allow*
+answers only that one launch.
+
+Lookup costs ~15 ms per launch, once per session.
+
+On a headless server, use the file — there is no keyring daemon to unlock:
+
+```sh
+mkdir -p ~/.config/youtrack-mcp
+printf %s 'perm-…' > ~/.config/youtrack-mcp/token
+chmod 600 ~/.config/youtrack-mcp/token
+```
+
+Write it with `printf %s`, not `echo`. A trailing newline is stripped on read anyway, but
+`echo` invites pasting stray whitespace that is invisible in an editor. Override the
+location with `YOUTRACK_TOKEN_FILE`. For a systemd unit, prefer `LoadCredential=` and
+export the value into `YOUTRACK_API_TOKEN` — source 1 wins and nothing touches the disk.
+
+### Why not put the token in the MCP config?
+
+Inlining a secret into an MCP client's config leaks it further than expected.
+`claude mcp add -e TOKEN=…` writes the value into `~/.claude.json` *and* into every
+rotating snapshot under `~/.claude/backups/` — files you never edited and would not think
+to scrub. A secret store keeps one copy under OS access control instead.
+
+If you would rather use the environment than a keyring, Claude Code expands `${VAR}` and
+`${VAR:-default}` inside `command`, `args`, `env`, `url`, and `headers` — so
+`"YOUTRACK_API_TOKEN": "${YOUTRACK_API_TOKEN}"` also keeps the literal value out of the
+config file.
+
+### 3. Private or incomplete certificate chains
+
+TLS verification is **on** and there is no switch to turn it off. If your instance serves
+a chain Node cannot verify — a private CA, or a reverse proxy that omits an intermediate
+— supply the missing certificate rather than disabling the check:
+
+```sh
+# in ~/.config/youtrack-mcp/config
+NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem
+```
+
+`certs/` and `*.pem` are gitignored, so the repo is a fine place to keep it.
+
+To find out what is missing:
+
+```sh
+openssl s_client -connect youtrack.example.com:443 -showcerts </dev/null
+```
+
+Browsers and `curl` paper over a missing intermediate — browsers chase the AIA extension,
+macOS caches intermediates in the keychain — but Node's bundled CA store does neither, so
+`fetch` fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` where everything else looked fine.
+The proper fix is server-side: configure the reverse proxy to send the full chain, then
+drop the setting.
+
+Keeping verification on is not pedantry. When an instance is only reachable through a
+VPN, the hostname off-VPN often still resolves — to the VPN gateway, which answers on 443
+with its own certificate. The name resolves and the port is open, so this is not a clean
+"host unreachable"; it is a *different host*. Verification is the only thing that stops
+the bearer token from being sent to it. The handshake is refused in ~0.1 s and the tools
+report:
+
+```
+Error: self-signed certificate in certificate chain (SELF_SIGNED_CERT_IN_CHAIN)
+
+TLS verification failed. Either the instance serves a private or incomplete certificate
+chain — point NODE_EXTRA_CA_CERTS at the missing CA — or something other than YouTrack
+answered, which is what a dropped VPN looks like.
+```
+
+### 4. Register with your MCP client
+
+```sh
+claude mcp add yt -- ~/youtrack-mcp-lite/bin/youtrack-mcp
+claude mcp list          # expect: yt … ✔ Connected
+```
+
+Use an **absolute** path; `~` is not expanded in every context. The wrapper supplies the
+URL, token, and CA path itself, so the config carries no secret at all:
+
+```jsonc
+// ~/.claude.json
+{
+  "mcpServers": {
+    "yt": {
+      "type": "stdio",
+      "command": "/absolute/path/to/youtrack-mcp-lite/bin/youtrack-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
+### 5. Verify
+
+```sh
+printf '%s\n' \
+ '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}' \
+ '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+ '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_current_user","arguments":{}}}' \
+ | ./bin/youtrack-mcp
+```
+
+Your login in the response means the URL, token, TLS, and network path are all good.
+
+## Troubleshooting
+
+| Symptom | Cause |
+| --- | --- |
+| `YOUTRACK_URL is not set` | No config file and nothing exported. See *Configuration*. |
+| `no API token found` | None of the four sources answered. The error lists all four with exact commands. |
+| `exec: node: not found` | The spawning process has a minimal `PATH`. Put an absolute `PATH=` export at the top of `bin/youtrack-mcp`, or symlink node into `/usr/local/bin`. Version managers (nvm, fnm) are the usual culprit — their shims are not on a non-login shell's `PATH`. |
+| `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node older than 24. |
+| `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | Your instance omits an intermediate. Vendor it and set `NODE_EXTRA_CA_CERTS`. |
+| `SELF_SIGNED_CERT_IN_CHAIN` | A private CA, an inspecting proxy, or a VPN gateway answering instead of YouTrack. |
+| `401` | Token revoked or mis-copied. Check with `curl -H "Authorization: Bearer <token>" "$YOUTRACK_URL/api/users/me?fields=login"`. |
+| `403` on `list_projects` | The account cannot read the project list. Issue tools still work for projects it can see. |
+| `404` on a valid issue ID | Usually permissions, not a typo — the API hides what you cannot read. |
+| `400` naming a field | An instance older than the field selectors used here. Check your version with `/api/config?fields=version,build` and open an issue. |
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `search_issues` | YouTrack query syntax → one line per match |
+| `get_issue` | Full issue: description, custom fields, timestamps |
+| `get_issue_comments` | Comment thread with authors |
+| `get_issue_links` | Linked issues grouped by link type |
+| `get_attachment_content` | List attachments, or fetch one |
+| `list_projects` | Short name → full name |
+| `get_current_user` | Resolves `me` in queries |
+
+## Prompts (slash commands)
+
+| Command | Does |
+| --- | --- |
+| `/mcp__yt__issue PROJ-123` | Issue + comments + links + attachments, summarised |
+| `/mcp__yt__my_open` | Your unresolved issues, grouped by project |
+| `/mcp__yt__recent PROJ [period]` | What moved in a project — `period` completes from YouTrack's named windows |
+| `/mcp__yt__search <plain language>` | Translates a plain-language request into YouTrack query syntax |
+
+The `yt` in `/mcp__yt__…` is the name the server is **registered** under, not anything
+inside the code — `claude mcp add yt` is what makes the commands short. Registering it as
+something else renames every command and tool accordingly.
+
+Prompts cost nothing in context: unlike tool schemas, they are fetched only when invoked.
+`recent` autocompletes project short names from the live project list, and falls back to
+no suggestions if the API is unreachable rather than failing the command.
+
+Only YouTrack's **named** date periods are emitted (`{This week}`, `{Today}`, …) rather
+than hand-rolled relative-date arithmetic, so the generated queries stay valid across
+versions.
+
+## Design notes
+
+**Results are text, not JSON.** Tool output is read by a model, not parsed by code, so
+every response renders as plain lines — no braces, no quotes, no `$type` noise, and empty
+fields omitted. A full issue costs ~550 bytes instead of ~2 KB.
+
+**Every request pins `fields=`.** YouTrack returns only what is asked for. The selectors
+in `youtrack.ts` are the main lever on context cost; widening one is never free.
+
+**Attachments are size-guarded.** Images inline only under 4 MB; every other binary
+returns metadata only. Without this, one 2.6 MB archive base64-encoded into a reply would
+blow the context window.
+
+Comment threads clamp at 24 KB in **aggregate**, not just per comment — 50 comments at
+the per-comment ceiling would otherwise be ~50k tokens. When the budget is exceeded the
+oldest comments are dropped, since recent entries carry the current state, and the count
+dropped is stated.
+
+Text files clamp at 24 KB (~6k tokens), **keeping both ends** rather than the first 24 KB.
+A log's opening lines are boot banners while the failure sits at the end, so head-only
+truncation reliably discards the interesting part. Measured on a real 29 KB `scan.log`:
+the clamp preserves both the version header and the closing stack trace.
+
+**The token never leaves the instance's origin.** Attachment URLs arrive inside YouTrack's
+own payload, so an absolute one pointing elsewhere would carry the bearer token off-host.
+Any URL whose origin does not match `YOUTRACK_URL` is refused before the request is made.
+
+**Read-only by construction.** There is no create, update, comment, or delete path
+anywhere in the code — not a flag that could be flipped, but an absence.
+
+## Development
+
+```sh
+node src/index.ts   # starts on stdio; expects YOUTRACK_URL and YOUTRACK_API_TOKEN
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

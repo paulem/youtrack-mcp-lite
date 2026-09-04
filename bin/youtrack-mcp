@@ -1,0 +1,76 @@
+#!/bin/sh
+# Launches the MCP server, resolving configuration and the API token from the most
+# secure store the host offers.
+#
+# Nothing instance-specific is baked in here. The URL, and any private CA the instance
+# needs, come from the config file below; the token comes from a secret store.
+#
+# The goal for the token is that no plaintext copy sits in an MCP client's config or its
+# rotating backups. Sources are tried in order and the first hit wins:
+#
+#   1. $YOUTRACK_API_TOKEN already exported  (systemd credentials, CI, manual export)
+#   2. macOS Keychain                        (desktop macOS)
+#   3. secret-tool / libsecret               (Linux desktop with an unlocked keyring)
+#   4. A 0600 token file                     (headless Linux — no keyring daemon there)
+#
+# Rotate on macOS:
+#   security add-generic-password -U -A -s youtrack-mcp -a "$(id -un)" -w '<new-token>'
+# Rotate on Linux (file):
+#   install -m600 /dev/null ~/.config/youtrack-mcp/token && printf %s '<new-token>' > ~/.config/youtrack-mcp/token
+
+set -eu
+
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/youtrack-mcp"
+CONFIG_FILE="${YOUTRACK_MCP_CONFIG:-$CONFIG_HOME/config}"
+TOKEN_FILE="${YOUTRACK_TOKEN_FILE:-$CONFIG_HOME/token}"
+
+# A shell fragment of KEY=value lines. Sourced rather than parsed so a value can be
+# computed — but it runs as you, so keep it 0600 and yours
+if [ -r "$CONFIG_FILE" ]; then
+  . "$CONFIG_FILE"
+fi
+
+# $USER is only set by login shells. An MCP client that spawns this with an explicit
+# environment leaves it unset, and under `set -u` that kills the lookup subshell —
+# silently, because of the `|| true` below
+ACCOUNT="${USER:-$(id -un)}"
+
+if [ -z "${YOUTRACK_API_TOKEN:-}" ] && command -v security >/dev/null 2>&1; then
+  YOUTRACK_API_TOKEN=$(security find-generic-password -w -s youtrack-mcp -a "$ACCOUNT" 2>/dev/null) || true
+fi
+
+if [ -z "${YOUTRACK_API_TOKEN:-}" ] && command -v secret-tool >/dev/null 2>&1; then
+  YOUTRACK_API_TOKEN=$(secret-tool lookup service youtrack-mcp username "$ACCOUNT" 2>/dev/null) || true
+fi
+
+if [ -z "${YOUTRACK_API_TOKEN:-}" ] && [ -r "$TOKEN_FILE" ]; then
+  # Strip a trailing newline: editors add one, and YouTrack rejects the token with it
+  YOUTRACK_API_TOKEN=$(tr -d '\r\n' < "$TOKEN_FILE")
+fi
+
+if [ -z "${YOUTRACK_URL:-}" ]; then
+  echo "youtrack-mcp: YOUTRACK_URL is not set. Provide it either way:" >&2
+  echo "  export YOUTRACK_URL='https://youtrack.example.com'" >&2
+  echo "  config: echo 'YOUTRACK_URL=https://youtrack.example.com' > $CONFIG_FILE" >&2
+  exit 1
+fi
+
+if [ -z "${YOUTRACK_API_TOKEN:-}" ]; then
+  echo "youtrack-mcp: no API token found. Provide one of:" >&2
+  echo "  export YOUTRACK_API_TOKEN='<token>'" >&2
+  echo "  macOS : security add-generic-password -U -A -s youtrack-mcp -a \"\$(id -un)\" -w '<token>'" >&2
+  echo "  Linux : secret-tool store --label=youtrack-mcp service youtrack-mcp username \"\$(id -un)\"" >&2
+  echo "  file  : printf %s '<token>' > $TOKEN_FILE && chmod 600 $TOKEN_FILE" >&2
+  exit 1
+fi
+
+export YOUTRACK_URL YOUTRACK_API_TOKEN
+
+# Set only when the instance serves an incomplete chain or a private CA — see the README.
+# Exported here so it can be set from the config file like everything else
+if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]; then
+  export NODE_EXTRA_CA_CERTS
+fi
+
+exec node "$DIR/src/index.ts" "$@"

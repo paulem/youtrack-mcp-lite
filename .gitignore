@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+
+# Instance-specific and secret. Everything the server needs to reach *your* YouTrack
+# lives outside the repo (~/.config/youtrack-mcp/) or in these paths
+certs/
+*.pem
+.env

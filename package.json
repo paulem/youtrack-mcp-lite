@@ -1,0 +1,35 @@
+{
+  "name": "youtrack-mcp-lite",
+  "version": "1.0.0",
+  "description": "Lightweight read-only MCP server for on-premises YouTrack Server installations that predate its built-in one",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "youtrack-mcp": "bin/youtrack-mcp"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "youtrack",
+    "mcp",
+    "model-context-protocol",
+    "jetbrains",
+    "self-hosted",
+    "on-premises",
+    "read-only"
+  ],
+  "scripts": {
+    "start": "node src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
