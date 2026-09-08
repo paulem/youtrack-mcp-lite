@@ -158,7 +158,10 @@ function createServer(): McpServer {
       description:
         'Search YouTrack issues using YouTrack query syntax and return a one-line summary per match. ' +
         'Examples: "project: PROJ State: Open", "assignee: me #Unresolved", "created: {This week}", ' +
-        '"project: PROJ order by updated desc". Use this to find issue IDs, then get_issue for full detail.',
+        '"project: PROJ sort by: updated desc". Use this to find issue IDs, then get_issue for full detail. ' +
+        'Sort with "sort by: <field> asc|desc" — the newer "order by" spelling is not recognised by the ' +
+        'YouTrack versions this server targets, and degrades the query into a text search that quietly ' +
+        'returns almost nothing.',
       inputSchema: z.object({
         query: z.string().describe('YouTrack search query, e.g. "project: PROJ State: Open"'),
         limit: z.number().int().min(1).max(100).default(20).describe('Max issues to return'),

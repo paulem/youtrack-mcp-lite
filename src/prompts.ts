@@ -66,7 +66,7 @@ export function registerPrompts(server: McpServer): void {
     () =>
       userMessage(
         `Show my open YouTrack issues.\n\n` +
-          `Call search_issues with the query "assignee: me #Unresolved order by updated desc" and a limit of 100.\n\n` +
+          `Call search_issues with the query "assignee: me #Unresolved sort by: updated desc" and a limit of 100.\n\n` +
           `Group the results by project. Within each group keep the most recently updated first. ` +
           `Call out anything that looks stalled — sitting in an in-progress state, or untouched for weeks. ` +
           `If there are none, say so plainly rather than padding the answer.`,
@@ -93,7 +93,7 @@ export function registerPrompts(server: McpServer): void {
       const window = period && PERIODS.includes(period as (typeof PERIODS)[number]) ? period : 'This week'
       return userMessage(
         `Summarise what moved in YouTrack project ${project} during {${window}}.\n\n` +
-          `Call search_issues with "project: ${project} updated: {${window}} order by updated desc" and a limit of 100.\n\n` +
+          `Call search_issues with "project: ${project} updated: {${window}} sort by: updated desc" and a limit of 100.\n\n` +
           `Report what actually changed: what was resolved, what is newly in progress, and what is stuck. ` +
           `Group by state rather than listing issues one by one. If the query returns nothing, say the project ` +
           `was quiet in that window instead of widening the search on your own.`,
@@ -115,7 +115,7 @@ export function registerPrompts(server: McpServer): void {
         `Find YouTrack issues matching: ${request}\n\n` +
           `Translate that into YouTrack query syntax and call search_issues. Useful building blocks: ` +
           `"project: X", "assignee: me", "#Unresolved", "#Resolved", "State: {In Progress}", ` +
-          `"updated: {This week}", "created: {Today}", "has: attachments", "order by updated desc".\n\n` +
+          `"updated: {This week}", "created: {Today}", "has: attachments", "sort by: updated desc".\n\n` +
           `Show me the query you used, then the results. If nothing matches, loosen one constraint and say which.`,
       ),
   )
