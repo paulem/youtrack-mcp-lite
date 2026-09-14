@@ -327,10 +327,10 @@ in `youtrack.ts` are the main lever on context cost; widening one is never free.
 returns metadata only. Without this, one 2.6 MB archive base64-encoded into a reply would
 blow the context window.
 
-Comment threads clamp at 24 KB in **aggregate**, not just per comment — 50 comments at
-the per-comment ceiling would otherwise be ~50k tokens. When the budget is exceeded the
-oldest comments are dropped, since recent entries carry the current state, and the count
-dropped is stated.
+**Ticket text is never clamped.** A description or comment thread is returned whole: a
+truncated spec costs the tokens and still needs a second read, so cutting it saves
+nothing. The `limit` on `get_issue_comments` bounds how many comments arrive, not how
+long each one is.
 
 Text files clamp at 24 KB (~6k tokens), **keeping both ends** rather than the first 24 KB.
 A log's opening lines are boot banners while the failure sits at the end, so head-only

@@ -41,14 +41,6 @@ const MAX_IMAGE_BYTES = 4_000_000
  */
 const MAX_TEXT_BYTES = 24_000
 
-const DESCRIPTION_LIMIT = 8_000
-const COMMENT_TEXT_LIMIT = 4_000
-/**
- * Aggregate ceiling for a comment thread. The per-comment limit alone bounds nothing:
- * 50 comments (the default page) at 4k each is ~50k tokens, and the 200 maximum is ~200k.
- */
-const COMMENT_TOTAL_LIMIT = 24_000
-
 const TEXTUAL_MIME = /^(text\/|application\/(json|xml|x-yaml|yaml|javascript|sql))/
 
 interface ToolResult {
@@ -182,7 +174,7 @@ function createServer(): McpServer {
       }),
       annotations: { title: 'Get issue', ...readOnly },
     },
-    async ({ issue_id }) => run(async () => textResult(renderIssue(await getIssue(issue_id), DESCRIPTION_LIMIT))),
+    async ({ issue_id }) => run(async () => textResult(renderIssue(await getIssue(issue_id)))),
   )
 
   server.registerTool(
@@ -195,10 +187,7 @@ function createServer(): McpServer {
       }),
       annotations: { title: 'Get issue comments', ...readOnly },
     },
-    async ({ issue_id, limit }) =>
-      run(async () =>
-        textResult(renderComments(await getComments(issue_id, limit), COMMENT_TEXT_LIMIT, COMMENT_TOTAL_LIMIT)),
-      ),
+    async ({ issue_id, limit }) => run(async () => textResult(renderComments(await getComments(issue_id, limit)))),
   )
 
   server.registerTool(

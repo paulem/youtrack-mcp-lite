@@ -36,11 +36,6 @@ function userName(user?: YouTrackUser | null): string {
   return user.fullName ? `${user.fullName} (${user.login})` : user.login
 }
 
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text
-  return `${text.slice(0, max)}\n… [truncated, ${text.length - max} more chars]`
-}
-
 /** One line per issue, with the fields that make a result list scannable. */
 export function renderIssueList(issues: Issue[]): string {
   if (issues.length === 0) return 'No issues matched.'
@@ -63,7 +58,7 @@ export function renderIssueList(issues: Issue[]): string {
     .join('\n')
 }
 
-export function renderIssue(issue: Issue, descriptionLimit: number): string {
+export function renderIssue(issue: Issue): string {
   const lines: string[] = [`# ${issue.idReadable}  ${issue.summary}`, '']
 
   const meta: string[] = []
@@ -88,43 +83,23 @@ export function renderIssue(issue: Issue, descriptionLimit: number): string {
   if (fields.length > 0) lines.push('', ...fields)
 
   if (issue.description?.trim()) {
-    lines.push('', '## Description', truncate(issue.description.trim(), descriptionLimit))
+    lines.push('', '## Description', issue.description.trim())
   }
 
   return lines.join('\n')
 }
 
-/**
- * Renders a comment thread within a total character budget.
- *
- * A per-comment limit alone does not bound the result: 50 comments at the per-comment
- * ceiling is still ~50k tokens. When the budget is exceeded the *oldest* comments are
- * dropped, because a thread's recent entries carry the current state — what was decided
- * and what is blocking. Surviving comments stay in chronological order.
- */
-export function renderComments(comments: Comment[], textLimit: number, totalLimit: number): string {
+export function renderComments(comments: Comment[]): string {
   if (comments.length === 0) return 'No comments.'
 
-  const blocks = comments.map((comment) => {
-    const when = formatDate(comment.created)
-    const head = `— ${userName(comment.author)}${when ? ` · ${when}` : ''}`
-    const body = comment.text?.trim() ? truncate(comment.text.trim(), textLimit) : '(empty)'
-    return `${head}\n${body}`
-  })
-
-  const kept: string[] = []
-  let used = 0
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const cost = blocks[i]!.length + 2
-    if (used + cost > totalLimit && kept.length > 0) break
-    kept.unshift(blocks[i]!)
-    used += cost
-  }
-
-  const dropped = blocks.length - kept.length
-  const notice = dropped > 0 ? `[${dropped} older comment${dropped === 1 ? '' : 's'} omitted to stay within budget]\n\n` : ''
-
-  return notice + kept.join('\n\n')
+  return comments
+    .map((comment) => {
+      const when = formatDate(comment.created)
+      const head = `— ${userName(comment.author)}${when ? ` · ${when}` : ''}`
+      const body = comment.text?.trim() || '(empty)'
+      return `${head}\n${body}`
+    })
+    .join('\n\n')
 }
 
 export function renderLinks(links: IssueLink[]): string {
