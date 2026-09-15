@@ -343,7 +343,8 @@ function createServer(): McpServer {
         command: z.string().min(1).describe('YouTrack command, e.g. "State In Progress assignee me"'),
         comment: z.string().optional().describe('Comment to add alongside the change'),
       }),
-      annotations: { title: 'Apply command', ...destructive },
+      // A comment or a tag accumulates on every call, so a retry is not free
+      annotations: { title: 'Apply command', ...destructive, idempotentHint: false },
     },
     async ({ issue_ids, command, comment }) =>
       run(async () => {
