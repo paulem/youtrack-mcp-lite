@@ -141,18 +141,11 @@ async function run(fn: () => Promise<ToolResult>): Promise<ToolResult> {
     return await fn()
   } catch (error) {
     if (error instanceof YouTrackError) {
-      return {
-        content: [{ type: 'text', text: `YouTrack error: ${error.message}${statusHint(error.status)}` }],
-        isError: true,
-      }
+      return errorResult(`YouTrack error: ${error.message}${statusHint(error.status)}`)
     }
 
     const { code, message } = rootCause(error)
-
-    return {
-      content: [{ type: 'text', text: `Error: ${message}${code ? ` (${code})` : ''}${networkHint(code)}` }],
-      isError: true,
-    }
+    return errorResult(`Error: ${message}${code ? ` (${code})` : ''}${networkHint(code)}`)
   }
 }
 
@@ -194,7 +187,7 @@ function createServer(): McpServer {
         'Get one issue by its readable ID (e.g. "PROJ-123") with summary, description, custom fields ' +
         '(State, Priority, Assignee, …) and timestamps. Does not include comments or attachments.',
       inputSchema: z.object({
-        issue_id: z.string().describe('Readable issue ID, e.g. "PROJ-123"'),
+        issue_id: ISSUE_ID,
       }),
       annotations: { title: 'Get issue', ...readOnly },
     },
@@ -206,7 +199,7 @@ function createServer(): McpServer {
     {
       description: 'Get the comment thread for an issue, oldest first, each with author and timestamp.',
       inputSchema: z.object({
-        issue_id: z.string().describe('Readable issue ID, e.g. "PROJ-123"'),
+        issue_id: ISSUE_ID,
         limit: z.number().int().min(1).max(200).default(50).describe('Max comments to return'),
       }),
       annotations: { title: 'Get issue comments', ...readOnly },
@@ -220,7 +213,7 @@ function createServer(): McpServer {
       description:
         'Get issues linked to this one (relates to, depends on, duplicates, subtask of, …), grouped by link type.',
       inputSchema: z.object({
-        issue_id: z.string().describe('Readable issue ID, e.g. "PROJ-123"'),
+        issue_id: ISSUE_ID,
       }),
       annotations: { title: 'Get issue links', ...readOnly },
     },
@@ -234,7 +227,7 @@ function createServer(): McpServer {
         'Read an issue attachment. Omit `name` to list what is attached; pass `name` to fetch one. ' +
         'Images are returned as viewable images, text files as text. Other binaries return metadata only.',
       inputSchema: z.object({
-        issue_id: z.string().describe('Readable issue ID, e.g. "PROJ-123"'),
+        issue_id: ISSUE_ID,
         name: z.string().optional().describe('Attachment file name; omit to list available attachments'),
       }),
       annotations: { title: 'Get attachment', ...readOnly },
@@ -249,12 +242,7 @@ function createServer(): McpServer {
           attachments.find((a) => a.name.toLowerCase() === name.toLowerCase())
 
         if (!match) {
-          return {
-            content: [
-              { type: 'text', text: `No attachment named "${name}".\n\nAvailable:\n${renderAttachmentList(attachments)}` },
-            ],
-            isError: true,
-          }
+          return errorResult(`No attachment named "${name}".\n\nAvailable:\n${renderAttachmentList(attachments)}`)
         }
 
         const mime = match.mimeType ?? 'application/octet-stream'
