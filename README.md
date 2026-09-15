@@ -1,7 +1,7 @@
 # youtrack-mcp-lite
 
-A minimal **read-only** MCP server for **on-premises YouTrack**. Seven tools, no build
-step, no Docker.
+A minimal MCP server for **on-premises YouTrack**. Fourteen tools, no build step, no
+Docker.
 
 ## Why this exists
 
@@ -13,26 +13,10 @@ Self-hosted YouTrack Server is different. It upgrades on the administrator's sch
 not JetBrains', and plenty of installs sit years behind — with no MCP option at all. That
 gap is what this fills, and it is the only case it is built for.
 
-It stays useful after an upgrade for anyone who wants a read-only, low-context
-alternative: it never writes to YouTrack, and it is built around spending as few tokens
-as possible per answer.
-
-Measured against [`tonyzorin/youtrack-mcp`][alt], the general-purpose alternative, which
-exposes 55 tools:
-
-| | `tonyzorin/youtrack-mcp` | this |
-| --- | --- | --- |
-| Startup | 588 ms (Docker + Python) | **95 ms** |
-| Tools | 55 | **7** |
-| Tool schemas in context | 17.7 KB (~4,525 tokens) | **3.8 KB (~975 tokens)** |
-| Runtime | Docker image (115 MB) | Node 24, 2 deps |
-| TLS | verification disabled | **verification on** |
-| Writes to YouTrack | yes | **no** |
-
-The tool count is the point. Every schema is resident in context for the whole session,
-whether or not it is ever called.
-
-[alt]: https://github.com/tonyzorin/youtrack-mcp
+It stays useful after an upgrade for anyone who wants a low-context alternative: it is
+built around spending as few tokens as possible per answer, and the tool count is kept
+small on purpose. Every tool schema is resident in context for the whole session, whether
+or not it is ever called, so every tool has to earn its place.
 
 ## Compatibility
 
@@ -277,21 +261,39 @@ Your login in the response means the URL, token, TLS, and network path are all g
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | Your instance omits an intermediate. Vendor it and set `NODE_EXTRA_CA_CERTS`. |
 | `SELF_SIGNED_CERT_IN_CHAIN` | A private CA, an inspecting proxy, or a VPN gateway answering instead of YouTrack. |
 | `401` | Token revoked or mis-copied. Check with `curl -H "Authorization: Bearer <token>" "$YOUTRACK_URL/api/users/me?fields=login"`. |
-| `403` on `list_projects` | The account cannot read the project list. Issue tools still work for projects it can see. |
+| `403` on `list_projects` or `create_issue` | The account cannot read the project list. Issue tools still work for projects it can see, but `create_issue` needs the list to resolve the project short name. |
 | `404` on a valid issue ID | Usually permissions, not a typo — the API hides what you cannot read. |
 | `400` naming a field | An instance older than the field selectors used here. Check your version with `/api/config?fields=version,build` and open an issue. |
 
 ## Tools
 
+Seven read, seven write.
+
 | Tool | Purpose |
 | --- | --- |
 | `search_issues` | YouTrack query syntax → one line per match |
 | `get_issue` | Full issue: description, custom fields, timestamps |
-| `get_issue_comments` | Comment thread with authors |
+| `get_issue_comments` | Comment thread with authors and comment IDs |
 | `get_issue_links` | Linked issues grouped by link type |
 | `get_attachment_content` | List attachments, or fetch one |
 | `list_projects` | Short name → full name |
 | `get_current_user` | Resolves `me` in queries |
+| `create_issue` | New issue from project, summary, description |
+| `update_issue` | Replace an issue's summary or description |
+| `apply_command` | YouTrack command language: state, assignee, priority, tags, links, … |
+| `add_issue_comment` | Add a comment |
+| `update_issue_comment` | Replace a comment's text |
+| `delete_issue_comment` | Delete a comment the way the UI does — restorable by an admin |
+| `add_attachment` | Upload a local file by absolute path |
+
+Fields are not set one tool at a time. `apply_command` speaks the same language as the
+command box in the web UI, so `State In Progress assignee me`, `Priority Critical`,
+`tag urgent`, `relates to PROJ-45`, and `remove subtask of PROJ-10` are all one tool and
+one round trip, and a command that does not parse or names an unknown value is refused
+by YouTrack with the reason. Summary and description are the only things the command
+language cannot touch, which is what `update_issue` is for.
+
+There is no tool that deletes an issue, an attachment, or a comment permanently.
 
 ## Prompts (slash commands)
 
@@ -341,8 +343,22 @@ the clamp preserves both the version header and the closing stack trace.
 own payload, so an absolute one pointing elsewhere would carry the bearer token off-host.
 Any URL whose origin does not match `YOUTRACK_URL` is refused before the request is made.
 
-**Read-only by construction.** There is no create, update, comment, or delete path
-anywhere in the code — not a flag that could be flipped, but an absence.
+**Writes are annotated, not guarded.** Every write tool carries the MCP annotations that
+say so, and a client such as Claude Code prompts before each call unless it has been
+allowlisted. The server adds no confirmation of its own; the one it would add is the one
+the client already shows.
+
+**Writes return what changed.** A create, edit, or command answers with the issue's
+refreshed one-line summary — the same format `search_issues` uses — so the model sees the
+new state without a second read.
+
+**Attachments are uploaded by path, not by content.** A model that has just written a
+screenshot or a log to disk hands over the absolute path, and the bytes go straight from
+the file to YouTrack without ever entering the context window.
+
+**Comment deletion is the UI's deletion.** The comment is marked deleted and an admin can
+restore it, exactly as when a person clicks delete in the browser. Nothing this server
+does is less reversible than the same action in the web UI.
 
 ## Development
 
