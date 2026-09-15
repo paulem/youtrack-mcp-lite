@@ -261,7 +261,7 @@ export async function updateIssue(id: string, fields: { summary?: string; descri
 export async function applyCommand(issueIds: string[], command: string, comment?: string): Promise<void> {
   const body: Record<string, unknown> = { query: command, issues: issueIds.map((idReadable) => ({ idReadable })) }
   if (comment !== undefined) body.comment = comment
-  await request('/api/commands', {}, body)
+  await request('/api/commands', { fields: 'id' }, body)
 }
 
 export async function addComment(id: string, text: string): Promise<Comment> {
