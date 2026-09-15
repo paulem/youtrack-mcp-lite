@@ -1,9 +1,13 @@
 /**
- * Read-only YouTrack MCP server.
+ * YouTrack MCP server.
  *
- * Exposes only the seven operations that browsing and reading issues actually need.
- * Nothing here mutates YouTrack — there is no create, update, comment, or delete path.
+ * Seven tools read issues; seven write to them. The write surface is deliberately
+ * small: create, comment, edit text, attach a file, and YouTrack's own command
+ * language for everything that is a field, a tag, or a link. Nothing deletes an issue.
  */
+
+import { stat } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 
 import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
@@ -21,14 +25,23 @@ import {
 } from './format.ts'
 import { registerPrompts } from './prompts.ts'
 import {
+  addComment,
+  applyCommand,
+  createIssue,
+  deleteComment,
   downloadAttachment,
+  findProject,
   getAttachments,
   getComments,
   getCurrentUser,
   getIssue,
+  getIssueSummary,
   getLinks,
   listProjects,
   searchIssues,
+  updateComment,
+  updateIssue,
+  uploadAttachment,
   YouTrackError,
 } from './youtrack.ts'
 
@@ -50,6 +63,10 @@ interface ToolResult {
 
 function textResult(text: string): ToolResult {
   return { content: [{ type: 'text', text }] }
+}
+
+function errorResult(text: string): ToolResult {
+  return { content: [{ type: 'text', text }], isError: true }
 }
 
 /** The host was never reached: DNS, routing, or a refused connection. */
@@ -98,7 +115,7 @@ function networkHint(code?: string): string {
 /** Maps the statuses YouTrack actually returns onto what the caller can do about them. */
 function statusHint(status: number): string {
   if (status === 401) return ' (the token is invalid, expired, or revoked)'
-  if (status === 403) return ' (the token lacks read permission for this project or resource)'
+  if (status === 403) return ' (the token lacks read or write permission for this project or resource)'
   if (status === 404) return ' (check the issue ID or your access rights)'
   return ''
 }
@@ -140,6 +157,13 @@ async function run(fn: () => Promise<ToolResult>): Promise<ToolResult> {
 }
 
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+/** Adds something new; calling twice adds it twice. */
+const additive = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+/** Replaces or removes something that exists. */
+const destructive = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }
+
+const ISSUE_ID = z.string().describe('Readable issue ID, e.g. "PROJ-123"')
+const COMMENT_ID = z.string().describe('Comment ID as shown by get_issue_comments, e.g. "4-123"')
 
 function createServer(): McpServer {
   const server = new McpServer({ name: 'youtrack', version: '1.0.0' })
@@ -275,6 +299,141 @@ function createServer(): McpServer {
       annotations: { title: 'Get current user', ...readOnly },
     },
     async () => run(async () => textResult(renderUser(await getCurrentUser()))),
+  )
+
+  server.registerTool(
+    'create_issue',
+    {
+      description:
+        'Create an issue in a project. Sets summary and description only; set State, Priority, Assignee, ' +
+        'Type and other fields afterwards with apply_command. Returns the new issue ID.',
+      inputSchema: z.object({
+        project: z.string().describe('Project short name, e.g. "PROJ" (see list_projects)'),
+        summary: z.string().min(1).describe('Issue title'),
+        description: z.string().optional().describe('Issue body, Markdown'),
+      }),
+      annotations: { title: 'Create issue', ...additive },
+    },
+    async ({ project, summary, description }) =>
+      run(async () => {
+        const found = await findProject(project)
+        if (!found) return errorResult(`No project with short name "${project}". Call list_projects to see what exists.`)
+        return textResult(`Created:\n${renderIssueList([await createIssue(found.id, summary, description)])}`)
+      }),
+  )
+
+  server.registerTool(
+    'update_issue',
+    {
+      description:
+        'Replace the summary and/or description of an issue. The text given replaces the whole field, so read ' +
+        'the issue first and send the complete new text. For State, Assignee, Priority and other fields use apply_command.',
+      inputSchema: z.object({
+        issue_id: ISSUE_ID,
+        summary: z.string().min(1).optional().describe('New title'),
+        description: z.string().optional().describe('New body, Markdown; replaces the existing description entirely'),
+      }),
+      annotations: { title: 'Update issue text', ...destructive },
+    },
+    async ({ issue_id, summary, description }) =>
+      run(async () => {
+        if (summary === undefined && description === undefined) return errorResult('Nothing to update: give summary and/or description.')
+        return textResult(renderIssueList([await updateIssue(issue_id, { summary, description })]))
+      }),
+  )
+
+  server.registerTool(
+    'apply_command',
+    {
+      description:
+        'Apply a YouTrack command to one or more issues — the same syntax as the command box in the web UI. ' +
+        'Examples: "State In Progress", "State Fixed assignee me", "Priority Critical Type Bug", "tag urgent", ' +
+        '"relates to PROJ-45", "subtask of PROJ-10", "remove relates to PROJ-45". Several clauses combine in ' +
+        'one command. Values with spaces need no quoting. Returns each issue\'s refreshed one-line summary.',
+      inputSchema: z.object({
+        issue_ids: z.array(ISSUE_ID).min(1).max(50).describe('Issues to apply the command to; usually one'),
+        command: z.string().min(1).describe('YouTrack command, e.g. "State In Progress assignee me"'),
+        comment: z.string().optional().describe('Comment to add alongside the change'),
+      }),
+      annotations: { title: 'Apply command', ...destructive },
+    },
+    async ({ issue_ids, command, comment }) =>
+      run(async () => {
+        await applyCommand(issue_ids, command, comment)
+        const issues = await Promise.all(issue_ids.map((id) => getIssueSummary(id)))
+        return textResult(renderIssueList(issues))
+      }),
+  )
+
+  server.registerTool(
+    'add_issue_comment',
+    {
+      description: 'Add a comment to an issue.',
+      inputSchema: z.object({
+        issue_id: ISSUE_ID,
+        text: z.string().min(1).describe('Comment body, Markdown'),
+      }),
+      annotations: { title: 'Add comment', ...additive },
+    },
+    async ({ issue_id, text }) => run(async () => textResult(renderComments([await addComment(issue_id, text)]))),
+  )
+
+  server.registerTool(
+    'update_issue_comment',
+    {
+      description:
+        'Replace the text of an existing comment. Only your own comments unless the account has the ' +
+        '"Update Not Own Comment" permission.',
+      inputSchema: z.object({
+        issue_id: ISSUE_ID,
+        comment_id: COMMENT_ID,
+        text: z.string().min(1).describe('New comment body, Markdown; replaces the existing text entirely'),
+      }),
+      annotations: { title: 'Update comment', ...destructive },
+    },
+    async ({ issue_id, comment_id, text }) =>
+      run(async () => textResult(renderComments([await updateComment(issue_id, comment_id, text)]))),
+  )
+
+  server.registerTool(
+    'delete_issue_comment',
+    {
+      description: 'Delete a comment the way the web UI does: it is hidden and an admin can restore it.',
+      inputSchema: z.object({
+        issue_id: ISSUE_ID,
+        comment_id: COMMENT_ID,
+      }),
+      annotations: { title: 'Delete comment', ...destructive },
+    },
+    async ({ issue_id, comment_id }) =>
+      run(async () => {
+        await deleteComment(issue_id, comment_id)
+        return textResult(`Deleted comment ${comment_id} on ${issue_id}.`)
+      }),
+  )
+
+  server.registerTool(
+    'add_attachment',
+    {
+      description:
+        'Attach a local file to an issue. The path must be absolute; the file is read from this machine and ' +
+        'uploaded as-is.',
+      inputSchema: z.object({
+        issue_id: ISSUE_ID,
+        path: z.string().describe('Absolute path to the file, e.g. "/Users/me/screenshot.png"'),
+      }),
+      annotations: { title: 'Add attachment', ...additive },
+    },
+    async ({ issue_id, path }) =>
+      run(async () => {
+        if (!isAbsolute(path)) return errorResult(`Path must be absolute, got "${path}".`)
+
+        const info = await stat(path).catch(() => null)
+        if (!info?.isFile()) return errorResult(`No file at "${path}".`)
+
+        const uploaded = await uploadAttachment(issue_id, path)
+        return textResult(`Attached to ${issue_id}:\n${renderAttachmentList([uploaded])}`)
+      }),
   )
 
   registerPrompts(server)

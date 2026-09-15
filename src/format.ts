@@ -95,7 +95,8 @@ export function renderComments(comments: Comment[]): string {
   return comments
     .map((comment) => {
       const when = formatDate(comment.created)
-      const head = `— ${userName(comment.author)}${when ? ` · ${when}` : ''}`
+      // The ID is what the edit and delete tools address, so every read carries it
+      const head = `— ${userName(comment.author)}${when ? ` · ${when}` : ''} · id ${comment.id}`
       const body = comment.text?.trim() || '(empty)'
       return `${head}\n${body}`
     })
