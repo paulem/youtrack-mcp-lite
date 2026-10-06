@@ -1,6 +1,6 @@
 {
   "name": "youtrack-onprem-mcp",
-  "version": "2.0.1",
+  "version": "3.0.0",
   "description": "Lightweight MCP server for on-premises YouTrack Server installations that predate its built-in one",
   "type": "module",
   "license": "MIT",

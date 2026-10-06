@@ -159,7 +159,7 @@ const ISSUE_ID = z.string().describe('Readable issue ID, e.g. "PROJ-123"')
 const COMMENT_ID = z.string().describe('Comment ID as shown by get_issue_comments, e.g. "4-123"')
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: 'youtrack-onprem-mcp', version: '2.0.1' })
+  const server = new McpServer({ name: 'youtrack-onprem-mcp', version: '3.0.0' })
 
   server.registerTool(
     'search_issues',
