@@ -1,4 +1,4 @@
-# youtrack-mcp-lite
+# youtrack-onprem-mcp
 
 A minimal MCP server for **on-premises YouTrack**. Fourteen tools, no build step, no
 Docker.
@@ -85,28 +85,28 @@ On macOS, `brew install node` or any version manager works.
 ## Install
 
 ```sh
-git clone https://github.com/paulem/youtrack-mcp-lite.git ~/youtrack-mcp-lite
-cd ~/youtrack-mcp-lite
+git clone https://github.com/paulem/youtrack-onprem-mcp.git ~/youtrack-onprem-mcp
+cd ~/youtrack-onprem-mcp
 git checkout "$(git describe --tags --abbrev=0)"   # latest release, not main
-npm ci                      # two runtime deps, no build step
-chmod +x bin/youtrack-mcp   # in case the mode bit did not survive the copy
+npm ci                             # two runtime deps, no build step
+chmod +x bin/youtrack-onprem-mcp   # in case the mode bit did not survive the copy
 ```
 
-Releases are git tags (`v2.0.1`, …). `main` may carry unreleased work, so stay on a tag.
+Releases are git tags (`v3.0.0`, …). `main` may carry unreleased work, so stay on a tag.
 
 ## Configuration
 
-Nothing instance-specific is committed. `bin/youtrack-mcp` reads it all at launch from
-`~/.config/youtrack-mcp/`, which the repo never touches.
+Nothing instance-specific is committed. `bin/youtrack-onprem-mcp` reads it all at launch
+from `~/.config/youtrack-onprem-mcp/`, which the repo never touches.
 
 ### 1. Point it at your instance
 
 ```sh
-mkdir -p ~/.config/youtrack-mcp
-cat > ~/.config/youtrack-mcp/config <<'EOF'
+mkdir -p ~/.config/youtrack-onprem-mcp
+cat > ~/.config/youtrack-onprem-mcp/config <<'EOF'
 YOUTRACK_URL=https://youtrack.example.com
 EOF
-chmod 600 ~/.config/youtrack-mcp/config
+chmod 600 ~/.config/youtrack-onprem-mcp/config
 ```
 
 The file is a shell fragment of `KEY=value` lines, sourced by the wrapper — so a value
@@ -139,25 +139,25 @@ and on a headless box:
 On macOS:
 
 ```sh
-security add-generic-password -U -A -s youtrack-mcp -a "$(id -un)" -w '<token>'
+security add-generic-password -U -A -s youtrack-onprem-mcp -a "$(id -un)" -w '<token>'
 ```
 
 **`-A` is not optional, and it must be repeated on every rotation.** Without it macOS
-raises a GUI authorization prompt (*"security wants to access key youtrack-mcp"*) on
-every read. A stdio server has no way to answer that dialog, so it simply blocks —
-startup goes from ~120 ms to however long the dialog sits unanswered. Re-storing the
-token without `-A` resets the item's ACL and reintroduces the prompt. If a dialog does
-appear, clicking **Always Allow** (not *Allow*) repairs the ACL permanently; *Allow*
-answers only that one launch.
+raises a GUI authorization prompt (*"security wants to access key
+youtrack-onprem-mcp"*) on every read. A stdio server has no way to answer that dialog,
+so it simply blocks — startup goes from ~120 ms to however long the dialog sits
+unanswered. Re-storing the token without `-A` resets the item's ACL and reintroduces the
+prompt. If a dialog does appear, clicking **Always Allow** (not *Allow*) repairs the ACL
+permanently; *Allow* answers only that one launch.
 
 Lookup costs ~15 ms per launch, once per session.
 
 On a headless server, use the file — there is no keyring daemon to unlock:
 
 ```sh
-mkdir -p ~/.config/youtrack-mcp
-printf %s 'perm-…' > ~/.config/youtrack-mcp/token
-chmod 600 ~/.config/youtrack-mcp/token
+mkdir -p ~/.config/youtrack-onprem-mcp
+printf %s 'perm-…' > ~/.config/youtrack-onprem-mcp/token
+chmod 600 ~/.config/youtrack-onprem-mcp/token
 ```
 
 Write it with `printf %s`, not `echo`. A trailing newline is stripped on read anyway, but
@@ -184,7 +184,7 @@ a chain Node cannot verify — a private CA, or a reverse proxy that omits an in
 — supply the missing certificate rather than disabling the check:
 
 ```sh
-# in ~/.config/youtrack-mcp/config
+# in ~/.config/youtrack-onprem-mcp/config
 NODE_EXTRA_CA_CERTS=/absolute/path/to/ca.pem
 ```
 
@@ -220,7 +220,7 @@ answered, which is what a dropped VPN looks like.
 ### 4. Register with your MCP client
 
 ```sh
-claude mcp add yt -- ~/youtrack-mcp-lite/bin/youtrack-mcp
+claude mcp add yt -- ~/youtrack-onprem-mcp/bin/youtrack-onprem-mcp
 claude mcp list          # expect: yt … ✔ Connected
 ```
 
@@ -233,7 +233,7 @@ URL, token, and CA path itself, so the config carries no secret at all:
   "mcpServers": {
     "yt": {
       "type": "stdio",
-      "command": "/absolute/path/to/youtrack-mcp-lite/bin/youtrack-mcp",
+      "command": "/absolute/path/to/youtrack-onprem-mcp/bin/youtrack-onprem-mcp",
       "args": [],
       "env": {}
     }
@@ -248,7 +248,7 @@ printf '%s\n' \
  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}' \
  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_current_user","arguments":{}}}' \
- | ./bin/youtrack-mcp
+ | ./bin/youtrack-onprem-mcp
 ```
 
 Your login in the response means the URL, token, TLS, and network path are all good.
@@ -256,7 +256,7 @@ Your login in the response means the URL, token, TLS, and network path are all g
 ## Updating
 
 ```sh
-cd ~/youtrack-mcp-lite
+cd ~/youtrack-onprem-mcp
 git fetch --tags
 latest=$(git describe --tags --abbrev=0 origin/main)
 git log --oneline "HEAD..$latest"   # what changed since your release
@@ -274,7 +274,7 @@ reconnect the server, `/mcp` in Claude Code) to pick up the new version.
 | --- | --- |
 | `YOUTRACK_URL is not set` | No config file and nothing exported. See *Configuration*. |
 | `no API token found` | None of the four sources answered. The error lists all four with exact commands. |
-| `exec: node: not found` | The spawning process has a minimal `PATH`. Put an absolute `PATH=` export at the top of `bin/youtrack-mcp`, or symlink node into `/usr/local/bin`. Version managers (nvm, fnm) are the usual culprit — their shims are not on a non-login shell's `PATH`. |
+| `exec: node: not found` | The spawning process has a minimal `PATH`. Put an absolute `PATH=` export at the top of `bin/youtrack-onprem-mcp`, or symlink node into `/usr/local/bin`. Version managers (nvm, fnm) are the usual culprit — their shims are not on a non-login shell's `PATH`. |
 | `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node older than 24. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | Your instance omits an intermediate. Vendor it and set `NODE_EXTRA_CA_CERTS`. |
 | `SELF_SIGNED_CERT_IN_CHAIN` | A private CA, an inspecting proxy, or a VPN gateway answering instead of YouTrack. |

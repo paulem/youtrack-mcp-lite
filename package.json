@@ -1,11 +1,11 @@
 {
-  "name": "youtrack-mcp-lite",
+  "name": "youtrack-onprem-mcp",
   "version": "2.0.1",
   "description": "Lightweight MCP server for on-premises YouTrack Server installations that predate its built-in one",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "youtrack-mcp": "bin/youtrack-mcp"
+    "youtrack-onprem-mcp": "bin/youtrack-onprem-mcp"
   },
   "files": [
     "bin",

@@ -3,7 +3,7 @@ node_modules/
 *.log
 
 # Instance-specific and secret. Everything the server needs to reach *your* YouTrack
-# lives outside the repo (~/.config/youtrack-mcp/) or in these paths
+# lives outside the repo (~/.config/youtrack-onprem-mcp/) or in these paths
 certs/
 *.pem
 .env
