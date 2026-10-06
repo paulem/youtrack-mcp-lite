@@ -85,11 +85,14 @@ On macOS, `brew install node` or any version manager works.
 ## Install
 
 ```sh
-git clone <this-repo> ~/youtrack-mcp-lite
+git clone https://github.com/paulem/youtrack-mcp-lite.git ~/youtrack-mcp-lite
 cd ~/youtrack-mcp-lite
+git checkout "$(git describe --tags --abbrev=0)"   # latest release, not main
 npm ci                      # two runtime deps, no build step
 chmod +x bin/youtrack-mcp   # in case the mode bit did not survive the copy
 ```
+
+Releases are git tags (`v2.0.1`, …). `main` may carry unreleased work, so stay on a tag.
 
 ## Configuration
 
@@ -250,6 +253,21 @@ printf '%s\n' \
 
 Your login in the response means the URL, token, TLS, and network path are all good.
 
+## Updating
+
+```sh
+cd ~/youtrack-mcp-lite
+git fetch --tags
+latest=$(git describe --tags --abbrev=0 origin/main)
+git log --oneline "HEAD..$latest"   # what changed since your release
+git checkout "$latest"
+npm ci
+```
+
+Configuration and the token live outside the repo, so an update never touches them.
+The server process lives as long as the client session, so restart the MCP client (or
+reconnect the server, `/mcp` in Claude Code) to pick up the new version.
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -365,6 +383,10 @@ does is less reversible than the same action in the web UI.
 ```sh
 node src/index.ts   # starts on stdio; expects YOUTRACK_URL and YOUTRACK_API_TOKEN
 ```
+
+To release, run `npm version <x.y.z> --no-git-tag-version` (it bumps `package.json` and
+the lockfile), set the same version in the `McpServer` constructor in `src/index.ts`,
+commit, then tag that commit `v<x.y.z>` and push the tag.
 
 ## License
 
