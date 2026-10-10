@@ -92,7 +92,9 @@ npm ci                             # two runtime deps, no build step
 chmod +x bin/youtrack-onprem-mcp   # in case the mode bit did not survive the copy
 ```
 
-Releases are git tags (`v3.0.0`, …). `main` may carry unreleased work, so stay on a tag.
+Releases are git tags (`v3.0.0`, …), each with notes on the
+[Releases](https://github.com/paulem/youtrack-onprem-mcp/releases) page. `main` may carry
+unreleased work, so stay on a tag.
 
 ## Configuration
 
@@ -255,6 +257,9 @@ Your login in the response means the URL, token, TLS, and network path are all g
 
 ## Updating
 
+Read the release notes of every version you skip first; any manual step an update needs,
+such as the 3.0.0 migration, is described there.
+
 ```sh
 cd ~/youtrack-onprem-mcp
 git fetch --tags
@@ -384,8 +389,26 @@ does is less reversible than the same action in the web UI.
 node src/index.ts   # starts on stdio; expects YOUTRACK_URL and YOUTRACK_API_TOKEN
 ```
 
-To release, run `npm version <x.y.z> --no-git-tag-version` (it bumps `package.json` and
-the lockfile), commit, then tag that commit `v<x.y.z>` and push the tag.
+### Releasing
+
+A release is an annotated `vX.Y.Z` tag on `main` plus a GitHub Release of the same
+name, whose hand-written notes are the changelog: what changed for users and, when it
+matters, how to update.
+
+Pick the bump from the commit types since the last tag
+(`git log --oneline "$(git describe --tags --abbrev=0)..HEAD"`). A breaking change bumps
+the major version, a `feat` the minor, and a `fix`, `perf`, or `revert` the patch. Other
+types never call for a release on their own. The version lives in `package.json` alone,
+and the server reports it to MCP clients from there.
+
+```sh
+npm version <major|minor|patch> -m "chore: Bump version to %s"
+git push --follow-tags origin main
+gh release create vX.Y.Z --title vX.Y.Z --notes-file <notes.md>
+```
+
+`npm version` refuses a dirty working tree, then bumps `package.json` and the lockfile,
+commits, and tags that commit.
 
 ## License
 
