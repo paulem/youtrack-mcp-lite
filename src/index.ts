@@ -13,6 +13,7 @@ import { McpServer } from '@modelcontextprotocol/server'
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import * as z from 'zod/v4'
 
+import packageJson from '../package.json' with { type: 'json' }
 import {
   renderAttachmentList,
   renderComments,
@@ -159,7 +160,7 @@ const ISSUE_ID = z.string().describe('Readable issue ID, e.g. "PROJ-123"')
 const COMMENT_ID = z.string().describe('Comment ID as shown by get_issue_comments, e.g. "4-123"')
 
 function createServer(): McpServer {
-  const server = new McpServer({ name: 'youtrack-onprem-mcp', version: '3.0.0' })
+  const server = new McpServer({ name: 'youtrack-onprem-mcp', version: packageJson.version })
 
   server.registerTool(
     'search_issues',

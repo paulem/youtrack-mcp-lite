@@ -385,8 +385,7 @@ node src/index.ts   # starts on stdio; expects YOUTRACK_URL and YOUTRACK_API_TOK
 ```
 
 To release, run `npm version <x.y.z> --no-git-tag-version` (it bumps `package.json` and
-the lockfile), set the same version in the `McpServer` constructor in `src/index.ts`,
-commit, then tag that commit `v<x.y.z>` and push the tag.
+the lockfile), commit, then tag that commit `v<x.y.z>` and push the tag.
 
 ## License
 
